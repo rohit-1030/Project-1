@@ -7,114 +7,120 @@ const methodOverride = require("method-override");
 const ejsMate = require("ejs-mate");
 const wrapAsync = require("./utils/wrapAsync.js");
 const ExpressError = require("./utils/ExpressError.js");
-const { listingSchema } = require("./schema.js");
-
+const { listingSchema, reviewSchema } = require("./schema.js");
+const Review = require("./models/review.js");
 const MONGO_URL = "mongodb://127.0.0.1:27017/wanderlust";
 
 app.set("views", path.join(__dirname, "views"));
 app.set("view engine", "ejs");
 app.use(express.urlencoded({ extended: true }));
 app.use(methodOverride("_method"));
-app.engine("ejs" , ejsMate);
-app.use(express.static(path.join(__dirname , "public")));
+app.engine("ejs", ejsMate);
+app.use(express.static(path.join(__dirname, "public")));
 
 main()
-    .then(()=>{
+    .then(() => {
         console.log("connected to db");
     })
-    .catch((err)=>{
+    .catch((err) => {
         console.log(err);
     });
-async function main(){
+async function main() {
     console.log(MONGO_URL);
     await mongoose.connect(MONGO_URL);
 }
 
-app.get("/" , (req , res )=>{
-    res.send("hi i am root") ;
+app.get("/", (req, res) => {
+    res.send("hi i am root");
 })
 
-const validateListing = (req , res , next)=>{
-    let {error} = listingSchema.validate(req.body);
+const validateListing = (req, res, next) => {
+    let { error } = listingSchema.validate(req.body);
     console.log(error);
-    if(error){
+    if (error) {
         let errMsg = error.details.map(el => el.message).join(",");
-        throw new ExpressError(400 , errMsg);
-    }else{
+        throw new ExpressError(400, errMsg);
+    } else {
         next();
     }
-}                   
+}
+
+const validateReview = (req, res, next) => {
+    let { error } = reviewSchema.validate(req.body);
+    console.log(error);
+    if (error) {
+        let errMsg = error.details.map(el => el.message).join(",");
+        throw new ExpressError(400, errMsg);
+    } else {
+        next();
+    }
+}
+
 //index route
-app.get("/listings" , wrapAsync(async (req,res) =>{
+app.get("/listings", wrapAsync(async (req, res) => {
     const allListings = await Listing.find({});
-    res.render("listings/index" , {allListings});
+    res.render("listings/index", { allListings });
 }))
+
 //New route
-app.get("/listings/new" , (req , res)=>{
+app.get("/listings/new", (req, res) => {
     res.render("listings/new");
 })
 
 //show route
-// app.get("/listings/:id"  ,async(req,res)=>{
-//     let {id} = req.params ;
-//     const listing = await Listing.findById(id);
-//     res.render("listings/show" , {listing});
-// })
-
 app.get("/listings/:id", wrapAsync(async (req, res) => {
     let { id } = req.params;
-    const listing = await Listing.findById(id);
+    const listing = await Listing.findById(id).populate("reviews");
+    console.log(listing);
     res.render("listings/show", { listing });
 }));
 
 //create route
-app.post("/listings" ,validateListing, wrapAsync(async(req ,res , next)=>{
+app.post("/listings", validateListing, wrapAsync(async (req, res, next) => {
     const newListing = new Listing(req.body.listing);
     await newListing.save();
     res.redirect("/listings");
 }))
 
 //update -> edit and update route and edit route -- get request 
-app.get("/listings/:id/edit" , wrapAsync(async(req,res)=>{
-    let {id} = req.params;
-    const listing = await Listing.findById(id) ; 
-    res.render("listings/edit.ejs" , {listing});
+app.get("/listings/:id/edit", wrapAsync(async (req, res) => {
+    let { id } = req.params;
+    const listing = await Listing.findById(id);
+    res.render("listings/edit.ejs", { listing });
 }))
 
 //update route
-app.put("/listings/:id" ,validateListing, wrapAsync(async(req , res)=>{
-    let {id} = req.params ;
-    await Listing.findByIdAndUpdate(id , {...req.body.listing}); 
+app.put("/listings/:id", validateListing, wrapAsync(async (req, res) => {
+    let { id } = req.params;
+    await Listing.findByIdAndUpdate(id, { ...req.body.listing });
     // res.redirect("/listings");    
     res.redirect(`/listings/${id}`);
 }))
 
 //delete route
-app.delete("/listings/:id" , wrapAsync(async(req ,res)=>{
-    let {id} = req.params ;
+app.delete("/listings/:id", wrapAsync(async (req, res) => {
+    let { id } = req.params;
     const deletedListing = await Listing.findByIdAndDelete(id);
     //console.log(deletedListing);
     res.redirect("/listings");
 }))
 
+//Review and Post route
+app.post("/listings/:id/reviews", validateReview, wrapAsync(async (req, res) => {
+    let listing = await Listing.findById(req.params.id);
+    let newReview = new Review(req.body.review);
 
-// app.get("/testListing" , async (req , res )=>{
-//     let sampleListing = new Listing({
-//         title : "My New Villa", 
-//         description : "By the beach" ,
-//         price : "12000" ,
-//         location : "Goa" ,
-//         country : "India" ,
-//     })
-//     await sampleListing.save() ;
-//     console.log("Sample was Saved") ,
-//     res.send("succesful testing")
-// })
+    listing.reviews.push(newReview);
+
+    await newReview.save();
+    await listing.save();
+
+    res.redirect(`/listings/${listing._id}`);
+}));
 
 app.all("/{*splat}", (req, res, next) => {
     next(new ExpressError(404, "Page Not Found !!!"));
 });
-
 
 app.use((err, req, res, next) => {
     console.log("Error statusCode:", err.statusCode);
@@ -124,10 +130,10 @@ app.use((err, req, res, next) => {
         statusCode = 500,
         message = "Something went wrong!"
     } = err;
-    res.status(statusCode).render("listings/error.ejs" , {message});
+    res.status(statusCode).render("listings/error.ejs", { message });
     //res.status(statusCode).send(message);
 });
- 
-app.listen(2000 , ()=>{
+
+app.listen(2000, () => {
     console.log("server is listening to port 2000")
 })
